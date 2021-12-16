@@ -1,0 +1,19 @@
+version: '3.7'
+
+x-shared_environment: &shared_environment
+  LOG_LEVEL: ${LOG_LEVEL:-debug}
+
+services:
+  api:
+    image: smokestack-vapor:latest
+    build:
+      context: .
+    env_file:
+        - ./.env
+    environment:
+      <<: *shared_environment
+    ports:
+      - '${PORT}:${PORT}'
+    volumes:
+      - "/etc/ssl/apns:/etc/ssl/apns:ro"
+    command: ["serve", "--env", "production", "--hostname", "${HOSTNAME}", "--port", "${PORT}"]

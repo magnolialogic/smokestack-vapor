@@ -1,0 +1,10 @@
+.DS_Store
+.env
+/.build
+/Packages
+/*.xcodeproj
+xcuserdata/
+DerivedData/
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.swiftpm/xcode/xcshareddata/xcschemes/smokestack-vapor.xcscheme
+Package.resolved
