@@ -37,8 +37,7 @@ final class StateTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
 		headers.contentType = .json
-		let putBody = ByteBuffer(data: SmokeState.shared.jsonData())
-		
+		let putBody = ByteBuffer(data: try JSONEncoder().encode(SmokeState.shared))
 		try app.test(.PUT, route, headers: headers, body: putBody, afterResponse: { response in
 			XCTAssertEqual(response.status, .accepted)
 			XCTAssertNotNil(try app.redis.get("state", asJSON: SmokeState.self).wait())

@@ -13,9 +13,8 @@ import CoreSmokestack
 // MARK: - Core
 
 final class SmokerAPICollection {
-	let jsonEncoder = JSONEncoder()
 	
-	/* /smoker/bootC
+	/* /smoker/boot
 	 * POST
 	 *
 	 * @HEADER Firmware-Version: String
@@ -43,7 +42,7 @@ final class SmokerAPICollection {
 	 * /smoker/heartbeat
 	 * POST
 	 *
-	 * @BODY: HeartbeatRequestContent.json()
+	 * @BODY: SmokeState.json()
 	 *
 	 * 1. Get/set initial Redis keys
 	 * 2. Reconcile smoker state
@@ -52,8 +51,8 @@ final class SmokerAPICollection {
 	 * 5. Construct and return ClientResponse
 	 *    HEADER Content-Type: application/json
 	 *    BODY {
-	 *        state: State.json()?,			nil if Redis key state:pending does not exist
-	 *        program: Program.json()?		nil if Redis key program:pending does not exist
+	 *        state: SmokeState.json()?,		nil if Redis key state:pending does not exist
+	 *        program: SmokeProgram.json()?		nil if Redis key program:pending does not exist
 	 *    }
 	 */
 	func heartbeat(request: Request) async throws -> ClientResponse {
@@ -108,13 +107,20 @@ final class SmokerAPICollection {
 		var probeLatest: Int?
 		if requestContent.temps[.probeCurrent] != nil {
 			probeLatest = Int(requestContent.temps[.probeCurrent]!.value)
+		} else {
+			probeLatest = nil
+			reconciledState.temps.removeValue(forKey: .probeCurrent)
 		}
 		
-		smokeReport.temps = SmokeTemperatureUpdate(grill: Int(requestContent.temps[.grillCurrent]!.value), probe: probeLatest)
+		let reportTemperatureUpdate = SmokeTemperatureUpdate(
+			grill: Int(requestContent.temps[.grillCurrent]!.value),
+			probe: requestContent.temps[.probeCurrent] != nil ? Int(requestContent.temps[.probeCurrent]!.value) : nil)
+		
+		smokeReport.temps = reportTemperatureUpdate
 		smokeReport.programIndex = existingProgram?.index
 		
-		if !NotificationManager.shared.ws.clients.active.isEmpty { // 4
-			NotificationManager.shared.ws.notifyClients(smokeReport)
+		if !request.application.notificationManager.ws.clients.active.isEmpty { // 4
+			request.application.notificationManager.ws.notifyClients(smokeReport)
 		}
 
 		var responseHeaders = HTTPHeaders() // 5
@@ -232,7 +238,14 @@ extension SmokerAPICollection {
 		var program: SmokeProgram?
 		
 		func json() -> String {
-			return "{\"state\":\(state?.json() ?? "null"),\"program\":\(program?.json() ?? "null")}"
+			var stateDescription = "null"
+			do {
+				let stateData = try JSONEncoder().encode(state)
+				stateDescription = String(data: stateData, encoding: .utf8) ?? "null"
+			} catch {
+				stateDescription = "null"
+			}
+			return "{\"state\":\(stateDescription),\"program\":\(program?.json() ?? "null")}"
 		}
 
 		func data() -> Data {

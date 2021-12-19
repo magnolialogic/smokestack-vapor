@@ -11,6 +11,8 @@ import Redis
 import CoreSmokestack
 
 final class SmokerTests: XCTestCase {
+	let jsonEncoder = JSONEncoder()
+	
 	func test1_Init() throws {
 		let app = Application(.testing)
 		defer { app.shutdown() }
@@ -21,20 +23,20 @@ final class SmokerTests: XCTestCase {
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: password.description)
 		headers.contentType = .json
 		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
-		let postBody = ByteBuffer(data: SmokeState.shared.jsonData())
+		let postBody = ByteBuffer(data: try jsonEncoder.encode(SmokeState.shared))
 		
 		try app.test(.POST, "api/smoker/boot", headers: headers, body: postBody, beforeRequest: { _ in
 			let msetKeys: [RedisKey: RESPValue] = [
 				"online": 1.convertedToRESPValue(),
-				"state": "state".convertedToRESPValue(),
-				"temp:grill": 123.convertedToRESPValue(),
-				"temp:probe": 123.convertedToRESPValue()
+				"state": "state".convertedToRESPValue()
 			]
 			XCTAssertNoThrow(try app.redis.mset(msetKeys).wait())
 		}, afterResponse: { response in
 			XCTAssertEqual(response.status, .ok)
-			XCTAssertEqual(try app.redis.exists(["online", "temp:grill", "temp:probe"]).wait(), 0)
+			XCTAssertEqual(try app.redis.exists(["online"]).wait(), 0)
 			XCTAssertEqual(try app.redis.get("state", asJSON: SmokeState.self).wait(), SmokeState.shared)
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -47,11 +49,12 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
 		dummyState.temps[.probeCurrent] = Measurement(value: 105, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 		
 		// TODO: add test for version:firmware
@@ -64,6 +67,8 @@ final class SmokerTests: XCTestCase {
 			let responseContent = try XCTUnwrap(try response.content.decode(SmokerAPICollection.HeartbeatResponseContent.self))
 			XCTAssertNil(responseContent.state)
 			XCTAssertNil(responseContent.program)
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -76,11 +81,12 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
 		dummyState.temps[.probeCurrent] = Measurement(value: 105, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 
 		// Validate state:pending == 1 and program:pending == nil
@@ -93,6 +99,8 @@ final class SmokerTests: XCTestCase {
 			XCTAssertNotNil(responseContent.state)
 			XCTAssertNil(responseContent.program)
 			XCTAssertEqual(try app.redis.exists("state:pending").wait(), 0)
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -105,11 +113,12 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
 		dummyState.temps[.probeCurrent] = Measurement(value: 105, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 		
 		// Validate state:pending == nil and program:pending == 1
@@ -125,11 +134,11 @@ final class SmokerTests: XCTestCase {
 		}, afterResponse: { response in
 			XCTAssertEqual(HTTPStatus.ok, response.status)
 			let responseContent = try XCTUnwrap(try response.content.decode(SmokerAPICollection.HeartbeatResponseContent.self))
-			print(responseContent)
 			XCTAssertNil(responseContent.state)
 			XCTAssertNotNil(responseContent.program?.steps)
 			XCTAssertEqual(try app.redis.exists("program:pending").wait(), 0)
-			_ = app.redis.delete(["program"])
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -142,11 +151,12 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
 		dummyState.temps[.probeCurrent] = Measurement(value: 105, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 		
 		try app.test(.POST, "api/smoker/heartbeat", headers: headers, body: postBody, beforeRequest: { _ in
@@ -166,6 +176,8 @@ final class SmokerTests: XCTestCase {
 			XCTAssertEqual(try app.redis.exists("program:pending").wait(), 0)
 			XCTAssertEqual(try app.redis.exists("state:pending").wait(), 0)
 			XCTAssertNoThrow(try app.redis.delete("program").wait())
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -178,10 +190,11 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 		
 		try app.test(.POST, "api/smoker/heartbeat", headers: headers, body: postBody, beforeRequest: { _ in
@@ -190,6 +203,8 @@ final class SmokerTests: XCTestCase {
 			XCTAssert([HTTPStatus.ok, HTTPStatus.partialContent, HTTPStatus.multiStatus].contains(response.status))
 			XCTAssertEqual(try app.redis.exists("online").wait(), 1)
 			XCTAssertNotEqual(try app.redis.ttl("online").wait().timeAmount, nil)
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -202,20 +217,21 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
 		dummyState.temps[.probeCurrent] = Measurement(value: 105, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 		
-		try app.test(.POST, "api/smoker/heartbeat", headers: headers, body: postBody, beforeRequest: { _ in
-			XCTAssertNoThrow(try app.redis.delete("temp:grill").wait())
-			XCTAssertNoThrow(try app.redis.delete("temp:probe").wait())
-		}, afterResponse: { response in
+		try app.test(.POST, "api/smoker/heartbeat", headers: headers, body: postBody, afterResponse: { response in
 			XCTAssertEqual(HTTPStatus.ok, response.status)
-			XCTAssertEqual(try app.redis.get("temp:grill", as: Int.self).wait(), Int(dummyState.temps[.grillCurrent]!.value))
-			XCTAssertEqual(try app.redis.get("temp:probe", as: Int.self).wait(), Int(dummyState.temps[.probeCurrent]!.value))
+			let resultState = try app.redis.get("state", asJSON: SmokeState.self).wait()
+			XCTAssertEqual(resultState!.temps[.grillCurrent]!.value, dummyState.temps[.grillCurrent]!.value)
+			XCTAssertEqual(resultState!.temps[.probeCurrent]!.value, dummyState.temps[.probeCurrent]!.value)
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 	
@@ -228,20 +244,21 @@ final class SmokerTests: XCTestCase {
 		var headers = HTTPHeaders()
 		headers.contentType = .json
 		headers.basicAuthorization = BasicAuthorization(username: XCTVAPOR_USERNAME, password: secretKey.description)
+		headers.add(name: "Firmware-Version", value: SOFTWARE_VERSION)
 		
 		let dummyState = SmokeState.shared
 		dummyState.temps[.grillCurrent] = Measurement(value: 225, unit: .fahrenheit)
-		let postBodyData = try NotificationManager.shared.jsonEncoder.encode(dummyState)
+		dummyState.temps.removeValue(forKey: .probeCurrent)
+		let postBodyData = try jsonEncoder.encode(dummyState)
 		let postBody = ByteBuffer(data: postBodyData)
 		
-		try app.test(.POST, "api/smoker/heartbeat", headers: headers, body: postBody, beforeRequest: { _ in
-			XCTAssertNoThrow(try app.redis.delete("temp:grill").wait())
-			XCTAssertNoThrow(try app.redis.delete("temp:probe").wait())
-		}, afterResponse: { response in
+		try app.test(.POST, "api/smoker/heartbeat", headers: headers, body: postBody, afterResponse: { response in
 			XCTAssertEqual(HTTPStatus.ok, response.status)
-			XCTAssertEqual(try app.redis.get("temp:grill", as: Int.self).wait(), Int(dummyState.temps[.grillCurrent]!.value))
-			XCTAssertEqual(try app.redis.exists("temp:probe").wait(), 0)
-			
+			let resultState = try app.redis.get("state", asJSON: SmokeState.self).wait()
+			XCTAssertEqual(resultState!.temps[.grillCurrent]!.value, dummyState.temps[.grillCurrent]!.value)
+			XCTAssertNil(resultState?.temps[.probeCurrent]?.value)
+			XCTAssertNoThrow(try app.redis.delete("state").wait())
+			XCTAssertNoThrow(try app.redis.delete("version:firmware").wait())
 		})
 	}
 }

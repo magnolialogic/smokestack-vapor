@@ -14,5 +14,4 @@ func routes(_ app: Application) throws {
 	try protected.register(collection: StateAPICollection())
 	try protected.register(collection: ProgramAPICollection())
 	try protected.register(collection: TimerAPICollection())
-	try protected.register(collection: NotificationManager.shared.ws)
 }

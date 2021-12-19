@@ -41,22 +41,19 @@ final class WebSocketClients {
 	func find(_ uuid: UUID) -> WebSocketClient? {
 		return self.clients[uuid]
 	}
-	
-	deinit {
-		Task {
-			self.clients.values.map { $0.socket.close() }
-		}
-	}
 }
 
 final class WebSocketController {
+	let app: Application
 	var clients = WebSocketClients()
+	private let jsonEncoder = JSONEncoder()
 	
-	func upgradeRequestToWebSocket(request: Request, webSocket: WebSocket) {
-		webSocket.pingInterval = .seconds(5)
-		let client = WebSocketClient(for: webSocket)
-		clients.add(client)
-		Task { // async greet new client
+	init(app: Application) {
+		self.app = app
+	}
+	
+	func greetClient(request: Request, webSocket: WebSocket) {
+		Task {
 			do {
 				let online = try await request.redis.exists("online").get().bool()
 				var temperatureUpdate: SmokeTemperatureUpdate?
@@ -72,39 +69,23 @@ final class WebSocketController {
 				let state = try await request.redis.get("state", asJSON: SmokeState.self).get()
 				let program = try await request.redis.get("program", asJSON: SmokeProgram.self).get()
 				let webSocketReport = SmokeReport(temps: temperatureUpdate ?? nil, state: state ?? nil, program: program ?? nil, softwareVersion: SOFTWARE_VERSION, firmwareVersion: online ? try request.redis.get("version:firmware", as: String.self).wait() : nil)
-				let webSocketData = try NotificationManager.shared.jsonEncoder.encode(webSocketReport)
+				let webSocketData = try jsonEncoder.encode(webSocketReport)
 				request.logger.info("WS GREET \(webSocketReport)")
 				webSocket.send(webSocketData.bytes)
 			} catch {
 				request.logger.error("WS ERROR!! Failed to greet new client")
 			}
 		}
-		request.logger.info("WS CLIENTS onConnect \(clients.active.count.description)")
-		
-		webSocket.onClose.whenSuccess {
-			request.logger.info("WS CLIENTS onClose \(self.clients.active.count.description)")
-		}
-		
-		webSocket.onClose.whenFailure { error in
-			request.logger.error("WS ERROR onClose")
-			request.logger.error("WS REASON: \(error)")
-		}
 	}
 	
 	func notifyClients(_ report: SmokeReport) {
 		do {
-			let webSocketData = try NotificationManager.shared.jsonEncoder.encode(report)
+			let webSocketData = try jsonEncoder.encode(report)
 			clients.active.forEach { client in
 				client.socket.send(webSocketData.bytes)
 			}
 		} catch {
-			print("Failed to encode JSON for \(report)")
+			app.logger.error("\(error.localizedDescription)")
 		}
-	}
-}
-
-extension WebSocketController: RouteCollection {
-	func boot(routes: RoutesBuilder) throws {
-		routes.webSocket(["api", "client", "ws"], onUpgrade: self.upgradeRequestToWebSocket)
 	}
 }

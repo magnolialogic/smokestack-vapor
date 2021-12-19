@@ -21,48 +21,40 @@ struct SmokestackAPNSNotification: APNSwiftNotification {
 }
 
 class APNSController {
+	let app: Application
+	private let jsonEncoder = JSONEncoder()
+	
+	init(app: Application) {
+		self.app = app
+	}
+	
 	private func getByteBuffer(for notification: SmokestackAPNSNotification) throws -> ByteBuffer {
-		return ByteBuffer(data: try NotificationManager.shared.jsonEncoder.encode(notification))
+		return ByteBuffer(data: try jsonEncoder.encode(notification))
 	}
 	
-	// MARK: - Overload all the things
-	
-	func send(environment: Environment, apns: APNSwiftClient, redis: RedisClient, logger: Logger, notification: SmokestackAPNSNotification) {
+	func send(_ notification: SmokestackAPNSNotification) {
 		Task {
-			try await sendAPNSRawBytes(environment: environment, apns: apns, redis: redis, logger: logger, notification: notification)
-		}
-	}
-	
-	func send(_ notification: SmokestackAPNSNotification, for context: Application) {
-		Task {
-			try await sendAPNSRawBytes(environment: context.environment, apns: context.apns, redis: context.redis, logger: context.logger, notification: notification)
-		}
-	}
-	
-	func send(_ notification: SmokestackAPNSNotification, for context: Request) {
-		Task {
-			try await sendAPNSRawBytes(environment: context.application.environment, apns: context.apns, redis: context.redis, logger: context.logger, notification: notification)
-		}
-	}
-	
-	// MARK: - Dirty work
-	
-	fileprivate func sendAPNSRawBytes(environment: Environment, apns: APNSwiftClient, redis: RedisClient, logger: Logger, notification: SmokestackAPNSNotification) async throws {
-		let deviceTokens = try await redisGetAllDeviceTokens(environment: environment, redis: redis)
-		guard !deviceTokens.isEmpty else {
-			logger.error("APNSController.send(): no tokens registered!")
-			return
-		}
-		var background = false
-		if notification.aps.alert == nil {
-			background = true
-		}
-		let apnsBytes = try getByteBuffer(for: notification)
-		deviceTokens.forEach { deviceToken in
-			apns.send(rawBytes: apnsBytes, pushType: background ? .background : .alert, to: deviceToken).whenFailure { error in
-				self.handleAPNSError(environment: environment, redis: redis, logger: logger, error: error, deviceToken: deviceToken)
+			do {
+				let deviceTokens = try await redisGetAllDeviceTokens(environment: app.environment, redis: app.redis)
+				guard !deviceTokens.isEmpty else {
+					app.logger.error("APNSController.send(): no tokens registered!")
+					return
+				}
+				var background = false
+				if notification.aps.alert == nil {
+					background = true
+				}
+				let apnsBytes = try getByteBuffer(for: notification)
+				deviceTokens.forEach { deviceToken in
+					app.apns.send(rawBytes: apnsBytes, pushType: background ? .background : .alert, to: deviceToken).whenFailure { [self] error in
+						handleAPNSError(environment: app.environment, redis: app.redis, logger: app.logger, error: error, deviceToken: deviceToken)
+					}
+				}
+			} catch {
+				app.logger.error("\(error.localizedDescription)")
 			}
 		}
+		
 	}
 	
 	// MARK: - Convenience methods

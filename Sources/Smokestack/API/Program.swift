@@ -74,7 +74,7 @@ final class ProgramAPICollection {
 		}
 		program.index = requestContent.index
 		_ = try await request.redis.set("program", toJSON: program)
-		NotificationManager.shared.send(SmokeReport(programIndex: requestContent.index), for: request)
+		request.application.notificationManager.send(SmokeReport(programIndex: requestContent.index))
 		
 		return .ok
 	}

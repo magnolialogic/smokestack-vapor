@@ -79,6 +79,24 @@ final class ClientAPICollection {
 		
 		return .accepted
 	}
+	
+	func upgradeToWebSocket(request: Request, webSocket: WebSocket) {
+		webSocket.pingInterval = .seconds(5)
+		let client = WebSocketClient(for: webSocket)
+		request.application.notificationManager.ws.clients.add(client)
+		request.logger.info("WS CLIENTS onConnect \(request.application.notificationManager.ws.clients.active.count.description)")
+		
+		request.application.notificationManager.ws.greetClient(request: request, webSocket: webSocket)
+		
+		webSocket.onClose.whenSuccess {
+			request.logger.info("WS CLIENTS onClose \(request.application.notificationManager.ws.clients.active.count.description)")
+		}
+		
+		webSocket.onClose.whenFailure { error in
+			request.logger.error("WS ERROR onClose")
+			request.logger.error("WS REASON: \(error)")
+		}
+	}
 }
 
 extension ClientAPICollection: RouteCollection {
@@ -86,6 +104,7 @@ extension ClientAPICollection: RouteCollection {
 		routes.post(["api", "client"], use: postClient)
 		routes.delete(["api", "client"], use: deleteClient)
 		routes.post(["api", "client", "password"], use: postPassword)
+		routes.webSocket(["api", "client", "upgrade"], onUpgrade: upgradeToWebSocket)
 	}
 }
 

@@ -36,11 +36,11 @@ public func configure(_ app: Application) throws {
 		authenticationMethod: jwtAuthConfiguration,
 		topic: "net.magnolialogic.smokestack",
 		environment: app.environment.name == "production" ? .production : .sandbox,
-		logger: app.logger)
+		logger: app.logger) // Use .sandbox if env in [.development, .testing]
 	
 	app.apns.configuration = apnsConfiguration
 	
-	
+	app.notificationManager = NotificationManager(app: app)
 	
 	// Fire it up!
 	try routes(app)
@@ -49,19 +49,19 @@ public func configure(_ app: Application) throws {
 	// Nuke any stale keys left over by an unclean exit
 	_ = app.redis.delete(["online", "state", "program", "version:firmware"])
 	
-	// Register for Redis expire keyevent notifications for "online" to send APNS + clean up other keys
+	// Register for Redis expire keyevent notifications for "online" to send interrupt to app + clean up other keys
 	_ = app.redis.subscribe(to: "__keyevent@0__:expired") { (publisher, message) in
 		if message.description == "online" {
 			app.logger.info("Smoker.heartbeat(): offline, smoker missed heartbeat window")
 			let statePatch = SmokeState.PatchContent(online: false)
 			let report = SmokeReport(statePatch: statePatch)
-			NotificationManager.shared.send(report, for: app)
+			app.notificationManager.send(report)
 			_ = app.redis.delete(["state", "version:firwmare"])
 		}
 	}
 	
 	// Wake-up call for any clients waiting for a connection
 	if app.environment != .testing {
-		NotificationManager.shared.send(SmokeReport(softwareVersion: SOFTWARE_VERSION), for: app)
+		app.notificationManager.send(SmokeReport(softwareVersion: SOFTWARE_VERSION))
 	}
 }

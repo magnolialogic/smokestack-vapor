@@ -12,29 +12,50 @@ import APNS
 import CoreSmokestack
 
 final class NotificationManager {
-	let apns = APNSController()
-	let ws = WebSocketController()
-	let jsonDecoder = JSONDecoder()
-	let jsonEncoder = JSONEncoder()
+	let app: Application
+	let apns: APNSController
+	let ws: WebSocketController
+	private let jsonDecoder = JSONDecoder()
+	private let jsonEncoder = JSONEncoder()
 	
-	private init() {}
-	
-	static let shared = NotificationManager()
-	
-	func send(_ report: SmokeReport, for context: Application) {
-		sendReport(environment: context.environment, apns: context.apns, redis: context.redis, logger: context.logger, report: report)
+	init(app: Application) {
+		self.app = app
+		self.apns = APNSController(app: app)
+		self.ws = WebSocketController(app: app)
 	}
 	
-	func send(_ report: SmokeReport, for context: Request) {
-		sendReport(environment: context.application.environment, apns: context.apns, redis: context.redis, logger: context.logger, report: report)
+	func send(_ report: SmokeReport) {
+		if ws.clients.active.isEmpty {
+			let notification = SmokestackAPNSNotification(aps: APNSwiftPayload(hasContentAvailable: true), data: report)
+			self.apns.send(notification)
+		} else {
+			ws.notifyClients(report)
+		}
 	}
 	
 	fileprivate func sendReport(environment: Environment, apns: APNSwiftClient, redis: RedisClient, logger: Logger, report: SmokeReport) {
 		if ws.clients.active.isEmpty {
 			let notification = SmokestackAPNSNotification(aps: APNSwiftPayload(hasContentAvailable: true), data: report)
-			self.apns.send(environment: environment, apns: apns, redis: redis, logger: logger, notification: notification)
+			self.apns.send(notification)
 		} else {
 			ws.notifyClients(report)
+		}
+	}
+}
+
+// MARK: - App service
+
+struct NotificationManagerStorageKey: StorageKey {
+	typealias Value = NotificationManager
+}
+
+extension Application {
+	var notificationManager: NotificationManager {
+		get {
+			self.storage[NotificationManagerStorageKey.self]!
+		}
+		set {
+			self.storage[NotificationManagerStorageKey.self] = newValue
 		}
 	}
 }
